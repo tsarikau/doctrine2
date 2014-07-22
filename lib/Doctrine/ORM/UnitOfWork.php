@@ -306,7 +306,7 @@ class UnitOfWork implements PropertyChangedListener
         $conn->beginTransaction();
 
         try {
-            if ($this->entityInsertions) {
+            while ($this->entityInsertions){
                 foreach ($commitOrder as $class) {
                     $this->executeInserts($class);
                 }
@@ -900,11 +900,29 @@ class UnitOfWork implements PropertyChangedListener
         $persister = $this->getEntityPersister($className);
         $entities  = array();
 
+        $associationsChecks=array_filter($class->associationMappings,function(array $mapping){
+            return $mapping['isOwningSide'];
+        });
+
         $hasLifecycleCallbacks = isset($class->lifecycleCallbacks[Events::postPersist]);
         $hasListeners          = $this->evm->hasListeners(Events::postPersist);
 
         foreach ($this->entityInsertions as $oid => $entity) {
             if ($this->em->getClassMetadata(get_class($entity))->name !== $className) {
+                continue;
+            }
+
+            $delayed=false;
+            foreach(array_keys($associationsChecks) as $associationField){
+                if ($associationValue=$class->reflFields[$associationField]->getValue($entity)){
+                    $associationValueHash=spl_object_hash($associationValue);
+                    if (!empty($this->entityInsertions[$associationValueHash])){
+                        $delayed=true;
+                        break;
+                    }
+                }
+            }
+            if ($delayed){
                 continue;
             }
 
